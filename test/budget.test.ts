@@ -69,4 +69,7 @@ test("a fleet day stays under the free-plan target", async () => {
   console.log(`fleet day: ${requests} requests (target ${TARGET.requests}), ~${rowsWritten} rows written (target ${TARGET.rowsWritten})`);
   expect(requests).toBeLessThanOrEqual(TARGET.requests);
   expect(rowsWritten).toBeLessThanOrEqual(TARGET.rowsWritten);
-}, 120_000);
+// Wall-clock headroom only: the simulated day, its traffic and TARGET are unchanged. `bun test` runs files in parallel,
+// and on a loaded machine this I/O-heavy day takes over two minutes, which rolled self-updates back instead of failing
+// on the budget it exists to guard.
+}, 300_000);
