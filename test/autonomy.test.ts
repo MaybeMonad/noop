@@ -142,6 +142,32 @@ test("routine dedupe: parked (waiting/blocked) copies never block the next run",
   expect(A.routineQueued("parked")).toBe("");
 });
 
+test("a copy parked on an unanswered decision is found only while that decision is open", () => {
+  writeDoc(P("decisions", "open", "D-0004.md"), { id: "D-0004", question: "告警源？" }, "x");
+  writeDoc(P("tasks", "waiting", "T-0201.md"), {
+    id: "T-0201", source: "routine:uptime-watch", wait_kind: "human", waiting_on: "等待主人答复 decisions/open/D-0004.md",
+  }, "");
+  expect(A.routineParkedOnDecision("uptime-watch")).toBe("T-0201");
+  expect(A.routineParkedOnDecision("other")).toBe("");
+  expect(A.routineParkedOnDecision("uptime-watch", "linux")).toBe(""); // not this machine's copy
+  expect(A.routineQueued("uptime-watch")).toBe(""); // parked copies still never block a run on their own
+  unlinkSync(P("decisions", "open", "D-0004.md"));
+  expect(A.routineParkedOnDecision("uptime-watch")).toBe(""); // answered or closed → the routine continues
+});
+
+test("waiting on CI or on a merge is not waiting on a decision", () => {
+  writeDoc(P("decisions", "open", "D-0004.md"), { id: "D-0004", question: "q" }, "x");
+  writeDoc(P("tasks", "waiting", "T-0202.md"), {
+    id: "T-0202", source: "routine:uptime-watch", wait_kind: "ci", waiting_on: "CI run https://github.com/o/r/actions/runs/1",
+  }, "");
+  writeDoc(P("tasks", "waiting", "T-0203.md"), {
+    id: "T-0203", source: "routine:own-prs-ci", wait_kind: "human", waiting_on: "PR https://github.com/o/r/pull/1 merged? then re-read D-0004",
+  }, "");
+  expect(A.routineParkedOnDecision("uptime-watch")).toBe("");
+  // a bare or incidental id mention is not a wait on the card: only the decisions/open path counts
+  expect(A.routineParkedOnDecision("own-prs-ci")).toBe("");
+});
+
 test("a routine stuck behind a copy no host can run for 30+ minutes notifies the owner once per copy", async () => {
   const st: Record<string, string> = {};
   const parked = (id: string, min: number) =>
