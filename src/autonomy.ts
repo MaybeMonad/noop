@@ -72,18 +72,33 @@ export const judgeMayDecide = (cfg: Cfg, agent?: string) => level(cfg, agent) !=
 export async function proposeBatch(cfg: Cfg, host: string) {
   // only real task files: an agent appending a note to a task's old path leaves a stub without frontmatter,
   // which would show as "undefined（undefined）" and, never matching the batch, rebuild it on every tick
-  const items = list(P("tasks", "proposed"), /^T-.*\.md$/).filter((p) => readDoc(p).meta.id === fileId(p)).slice(0, 9);
-  const itemIds = items.map((p) => readDoc(p).meta.id);
+  const all = list(P("tasks", "proposed"), /^T-.*\.md$/).filter((p) => readDoc(p).meta.id === fileId(p));
   const openPath = list(P("decisions", "open")).find((p) => readDoc(p).meta.kind === "proposals");
+  const listed = openPath ? (readDoc(openPath).meta.items ?? "").split(",").filter(Boolean) : [];
+  // An unanswered batch must not hide later work: a proposal the owner has not been shown yet goes before one
+  // he already saw and left unanswered, so a rebuild surfaces new tasks instead of re-offering the same nine
+  // forever. Priority breaks ties, then path order, so the oldest of a group is still first.
+  const offered = new Set(listed);
+  const rank = (p: string): [number, number] => {
+    const m = readDoc(p).meta;
+    return [offered.has(m.id) ? 1 : 0, m.priority === "high" ? 0 : m.priority === "low" ? 2 : 1];
+  };
+  const items = [...all].sort((a, b) => {
+    const [ra, rb] = [rank(a), rank(b)];
+    return ra[0] - rb[0] || ra[1] - rb[1] || a.localeCompare(b);
+  }).slice(0, 9);
+  const itemIds = items.map((p) => readDoc(p).meta.id);
   if (openPath) {
     // An unanswered batch must not block later work forever: rebuild it when it went stale
     // (its tasks left tasks/proposed) or new proposals arrived, but notify at most every few hours.
     const { meta } = readDoc(openPath);
-    const listed = (meta.items ?? "").split(",").filter(Boolean);
-    const stale = listed.some((t: string) => !itemIds.includes(t));
-    const fresh = itemIds.some((t) => !listed.includes(t));
+    // judged against every proposed task, not against the nine above: once an unanswered batch is rebuilt
+    // with newer items, an older one can drop out of the slice without having been acted on
+    const proposed = new Set(all.map((p) => readDoc(p).meta.id));
+    const stale = listed.some((t) => !proposed.has(t));
+    const fresh = [...proposed].some((t) => !listed.includes(t));
     if (!stale && !fresh) return;
-    const alive = listed.some((t: string) => itemIds.includes(t));
+    const alive = listed.some((t) => proposed.has(t));
     const age = Date.now() - Date.parse(meta.notified ?? meta.created);
     if (alive && age < (cfg.autonomy?.renotify_hours ?? 3) * 3600_000) return;
     closeBatch(openPath, itemIds.length ? "superseded (rebuilt)" : "superseded (nothing left)");
