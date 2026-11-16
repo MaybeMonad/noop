@@ -108,7 +108,12 @@ function runRoutines(cfg: Cfg, host: string, primary: boolean) {
     const parked = r.skip_while_decision_open ? routineParkedOnDecision(r.name, pin) : "";
     if (parked) {
       state[r.name] = new Date().toISOString();
-      journal(host, `⏰ routine \`${r.name}\` skipped: ${parked} waits on the owner's answer`);
+      // once per parked copy, not once per skipped tick: a 10m routine would otherwise fill the journal with the same line
+      const key = `${r.name}#parked`;
+      if (state[key] !== parked) {
+        state[key] = parked;
+        journal(host, `⏰ routine \`${r.name}\` skipped: ${parked} waits on the owner's answer`);
+      }
       continue;
     }
     if (r.signal && !signalChanged(r, state)) { state[r.name] = new Date().toISOString(); continue; } // nothing new → no AI run
