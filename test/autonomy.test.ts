@@ -155,6 +155,20 @@ test("a copy parked on an unanswered decision is found only while that decision 
   expect(A.routineParkedOnDecision("uptime-watch")).toBe(""); // answered or closed → the routine continues
 });
 
+test("a copy parked in tasks/blocked by needs_decision counts while its decision is open", () => {
+  // the standard path most routine copies take: returning needs_decision parks the task in tasks/blocked with
+  // meta.decision, not a waiting_on string. Missing it made skip_while_decision_open a no-op for those copies.
+  writeDoc(P("decisions", "open", "D-0009.md"), { id: "D-0009", question: "q" }, "x");
+  writeDoc(P("tasks", "blocked", "T-0211.md"), { id: "T-0211", source: "routine:pr-review", status: "needs_decision", decision: "D-0009" }, "");
+  expect(A.routineParkedOnDecision("pr-review")).toBe("T-0211");
+  expect(A.routineParkedOnDecision("pr-review", "linux")).toBe(""); // per-machine routine: another host's copy
+  unlinkSync(P("decisions", "open", "D-0009.md"));
+  expect(A.routineParkedOnDecision("pr-review")).toBe(""); // answered or closed → the routine continues
+  // a blocked copy whose decision file is gone (or an id that is not a card) must not silence the routine
+  writeDoc(P("tasks", "blocked", "T-0212.md"), { id: "T-0212", source: "routine:pr-review", status: "needs_decision", decision: "D-9999" }, "");
+  expect(A.routineParkedOnDecision("pr-review")).toBe("");
+});
+
 test("waiting on CI or on a merge is not waiting on a decision", () => {
   writeDoc(P("decisions", "open", "D-0004.md"), { id: "D-0004", question: "q" }, "x");
   writeDoc(P("tasks", "waiting", "T-0202.md"), {
