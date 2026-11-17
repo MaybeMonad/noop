@@ -167,6 +167,11 @@ test("a copy parked in tasks/blocked by needs_decision counts while its decision
   // a blocked copy whose decision file is gone (or an id that is not a card) must not silence the routine
   writeDoc(P("tasks", "blocked", "T-0212.md"), { id: "T-0212", source: "routine:pr-review", status: "needs_decision", decision: "D-9999" }, "");
   expect(A.routineParkedOnDecision("pr-review")).toBe("");
+  // a supervisor stall card is bookkeeping over old copies, not a question the routine asked: it must not
+  // silence the routine forever on a card the owner never saw as a question
+  writeDoc(P("decisions", "open", "D-0010.md"), { id: "D-0010", question: "长时间运行", supervisor_cause: "slow:mac" }, "x");
+  writeDoc(P("tasks", "blocked", "T-0213.md"), { id: "T-0213", source: "routine:pr-review", status: "needs_decision", decision: "D-0010" }, "");
+  expect(A.routineParkedOnDecision("pr-review")).toBe("");
 });
 
 test("waiting on CI or on a merge is not waiting on a decision", () => {

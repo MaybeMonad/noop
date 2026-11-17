@@ -45,7 +45,14 @@ export function routineQueued(name: string, host?: string): string {
  *  only repeat the same report (routine `skip_while_decision_open = true`). Waits on CI or a merge do not count.
  *  `host`: a per-machine routine (scheduler "each") only counts its own machine's copies. */
 export function routineParkedOnDecision(name: string, host?: string): string {
-  const open = (id: string) => /^D-\d+$/.test(id) && existsSync(P("decisions", "open", `${id}.md`));
+  // a decision the routine itself asked and the owner has not answered yet. Stall cards the supervisor raised on its
+  // own (supervisor_cause, e.g. "slow:<host>") are bookkeeping over old tasks, not questions the routine asked:
+  // counting them would silence a routine forever on cards the owner never saw as a question.
+  const open = (id: string) => {
+    if (!/^D-\d+$/.test(id)) return false;
+    const f = P("decisions", "open", `${id}.md`);
+    return existsSync(f) && !readDoc(f).meta.supervisor_cause;
+  };
   for (const p of list(P("tasks", "waiting"), /^T-.*\.md$/)) {
     const m = readDoc(p).meta;
     if (!isRoutine(m, name) || (host && m.host !== host)) continue;
