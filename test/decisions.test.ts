@@ -163,13 +163,3 @@ test("a different task still gets its own card", () => {
   const b = dec.openDecision({ id: "T-0011", agent: "lead" }, r, "h");
   expect(a).not.toBe(b);
 });
-
-test("a new idle menu supersedes the previous unanswered one", () => {
-  const r = (question: string) => ({ status: "needs_decision", summary: "idle", question, recommendation: "1", options: ["1. a", "2. b"] } as any);
-  const first = dec.openDecision({ id: "T-0310", agent: "chief-of-staff", kind: "menu" }, r("先做哪几项？"), "h");
-  const second = dec.openDecision({ id: "T-0311", agent: "chief-of-staff", kind: "menu" }, r("今晚先做哪几项？"), "h");
-  expect(existsSync(core.P("decisions", "open", `${first}.md`))).toBe(false); // no second card left behind
-  expect(existsSync(core.P("decisions", "open", `${second}.md`))).toBe(true);
-  expect(closed(first).answer).toBe(`superseded:${second}`);
-  expect(closed(first).answered_by).toBe("system"); // a supersede is not an owner answer
-});

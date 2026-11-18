@@ -21,18 +21,6 @@ export function openDecision(task: Record<string, string>, res: Result, host: st
     attachments: (res.attachments ?? []).join(" | ") || undefined,
     kind: task.kind === "menu" ? "menu" : undefined,
   }, `## Context\n${res.summary}\n\n## Options\n${opts.map((o) => `- ${o}`).join("\n")}\n`);
-  // A new menu is the refreshed version of the previous one. Leaving the old cards open filled the owner's list with
-  // near-identical "what next" questions (13 open on 2026-11-18, two raised five minutes apart), and every one of them
-  // waited on an owner who answers cards rarely. Close them the way rebuilt proposal batches are closed — as
-  // system-superseded, never as an owner answer.
-  if (task.kind === "menu") {
-    for (const p of list(P("decisions", "open"))) {
-      const { meta: m, body } = readDoc(p);
-      if (m.kind !== "menu" || m.id === id || m.task === task.id) continue;
-      writeDoc(P("decisions", "closed", `${m.id}.md`), { ...m, answer: `superseded:${id}`, answered_by: "system", answered: now() }, body + `\n## Answer\nsuperseded:${id}\n`);
-      unlinkSync(p);
-    }
-  }
   return id;
 }
 
