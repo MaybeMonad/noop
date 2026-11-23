@@ -7,9 +7,14 @@ import { judgeAccuracy, routinesAwaitingApproval } from "./autonomy";
 // Which code produced these numbers. Twice now a host reported a healthy fleet while the daemon was still running a
 // checkout pinned 20+ commits back by local edits, so every fix merged upstream was inert there and every figure below
 // was computed by the old formula. `behind_origin` compares against the last fetched `origin/main` (no network here).
+// Each read gets 30 s, not 3 s: on a thrashing host process startup alone reaches 1-2 s (git uses 0.01 s CPU but takes
+// 0.5-1.5 s wall at load 60), and a 3 s cap killed the read and reported "no git checkout" — a false red in the
+// code-provenance test that rolled a valid self-update back on 2026-11-23. 30 s still bounds a truly wedged git but
+// leaves the old observed worst case (2.3 s per spawn at load 200-370) more than tenfold room.
+const GIT_TIMEOUT = 30_000;
 export function codeState(root = CODE) {
   const git = (...a: string[]) => {
-    try { return Bun.spawnSync(["git", "-C", root, ...a], { stdout: "pipe", stderr: "ignore", timeout: 3000 }).stdout.toString().trim(); }
+    try { return Bun.spawnSync(["git", "-C", root, ...a], { stdout: "pipe", stderr: "ignore", timeout: GIT_TIMEOUT }).stdout.toString().trim(); }
     catch { return ""; }
   };
   const commit = git("rev-parse", "--short", "HEAD");
