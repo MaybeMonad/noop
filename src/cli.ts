@@ -441,18 +441,29 @@ async function answerReplies(cfg: Cfg, host: string, queued: ReturnType<typeof p
 }
 
 /** Requeue tasks whose claiming host went silent (crash, sleep, network loss). */
-function reapStale(cfg: Cfg, host: string, ownOnly = false) {
+export function reapStale(cfg: Cfg, host: string, ownOnly = false) {
   const alive = new Set(onlineHosts(cfg).map((h) => h.host));
   const graceMs = (cfg.fleet?.reap_after_minutes ?? 20) * 60_000;
   for (const p of list(P("tasks", "active"), /^T-.*\.md$/)) {
     const { meta, body } = readDoc(p);
+    const own = meta.claimed_by === host;
     // own tasks not run by this process were orphaned by a crash/restart (we're alive, so no one else reaps them)
-    if (meta.claimed_by === host ? runningIds.has(meta.id) : ownOnly || alive.has(meta.claimed_by)) continue;
+    if (own ? runningIds.has(meta.id) : ownOnly || alive.has(meta.claimed_by)) continue;
     if (Date.now() - Date.parse(meta.started) < graceMs) continue;
+    // The task is queued again already (a failed claim or a stalled run put it back): this active copy is a stale
+    // claim restored from the sync base. Drop it — requeueing would overwrite the queued copy's attempt and stall
+    // counters, so the task could reset its retry budget forever (2026-11-25: 69 such lines in one day).
+    if (own && existsSync(P("tasks", "inbox", `${meta.id}.md`))) {
+      require("node:fs").unlinkSync(p);
+      journal(host, `♻️ dropped the stale claim of ${meta.id} on ${host} (it is already queued again)`);
+      continue;
+    }
     writeDoc(P("tasks", "inbox", `${meta.id}.md`), { ...meta, claimed_by: undefined, requeued: now(),
-      requeue_note: `Requeued: host ${meta.claimed_by} went offline mid-task. Check for partial work (branch agent/${meta.id}-*).` }, body);
+      requeue_note: own
+        ? `Requeued: no run of this task is alive on ${host} (crashed or restarted). Check for partial work (branch agent/${meta.id}-*).`
+        : `Requeued: host ${meta.claimed_by} went offline mid-task. Check for partial work (branch agent/${meta.id}-*).` }, body);
     require("node:fs").unlinkSync(p);
-    journal(host, `♻️ requeued ${meta.id} (host ${meta.claimed_by} offline)`);
+    journal(host, own ? `♻️ requeued ${meta.id} (claimed by ${host}, but its run is gone)` : `♻️ requeued ${meta.id} (host ${meta.claimed_by} offline)`);
   }
 }
 
