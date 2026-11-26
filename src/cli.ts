@@ -32,11 +32,13 @@ import { isWrite, runTool } from "../cloud/src/tools";
 import { cloudDeploy, startCloudBridge } from "./cloud";
 import { adoptCloudUrl, readHubToml } from "./sync";
 import { judgeAccuracy, level, needsApproval, noteStuckRoutine, proposeBatch, resolveProposals, retireUnrunnableCopy, retireUnrunnableProposed, routineParkedOnDecision, routineQueued, routinesAwaitingApproval, supersedeProposed } from "./autonomy";
-import { CODE, L, UPDATE_REQUEST, type UpdateState, setUpdateState, updateState, allowedClis, cliHintPatch, fleetClis, capOk, idTagFor, isPrimary, isCloudDeployHost, knownHostCaps, runningRev, setApprovalGate, setIdTag } from "./core";
+import { CODE, L, isEnglish, UPDATE_REQUEST, type UpdateState, setUpdateState, updateState, allowedClis, cliHintPatch, fleetClis, capOk, idTagFor, isPrimary, isCloudDeployHost, knownHostCaps, runningRev, setApprovalGate, setIdTag } from "./core";
 import { accountEnv, accountsStatus, classify, failoverAccount, networkBlocked, pendingLoginIds, pickAccount, reportFailure, reportNetworkBlock, retryLogins, submitLoginCode } from "./accounts";
 import { channelPrompt, channels, resolveChannels, updateChannel } from "./channels";
 import { shellBash } from "./shell";
 import { strayWorkspaces, taskWorkspace, workspaceRoot } from "./workspaces";
+import { gradeMeta, parseGrades } from "../app/grading";
+import { measuredGrade, runReviews, stampReviews } from "./review-grade";
 
 // ------------------------------------------------------------------ routines (scheduled task generators)
 const STATE = P("logs", "routine-state.json");
@@ -327,6 +329,10 @@ async function processTask(path: string, cfg: Cfg, host: string) {
     });
     return;
   }
+  // the agent's self-grade of this run, its size measured from the PRs / MRs it names (outside the lock: one read per PR)
+  const reviews = runReviews(res.prs, `${res.summary}\n${res.waiting_on ?? ""}`);
+  const selfGrade = parseGrades(res.grades);
+  const grade = selfGrade && reviews.length && res.status !== "failed" ? await measuredGrade(selfGrade, reviews, !isEnglish()).catch(() => selfGrade) : selfGrade;
   await locked(async () => {
   await _pull();
 
@@ -343,7 +349,8 @@ async function processTask(path: string, cfg: Cfg, host: string) {
     children.push(id);
     journal(host, `  ↳ ${id} → ${f.agent ?? agent}: ${f.title}`);
   }
-  const done = { ...meta, channels: chans, cli_used: cli, finished: now(), status: res.status, gate_override: undefined, requeue_note: undefined, stalls: undefined };
+  // a later run without a grade keeps the earlier one
+  const done = { ...meta, channels: chans, cli_used: cli, finished: now(), status: res.status, gate_override: undefined, requeue_note: undefined, stalls: undefined, ...(grade ? gradeMeta(grade) : {}) };
   const runNote = `\n\n## Run ${now()} · ${host} · ${cli}\n**${res.status}** — ${res.summary}\n`;
   // the owner added to the request while it ran: run again with the additions instead of reporting a stale result
   const latest = existsSync(path) ? readDoc(path).body : body;
@@ -387,6 +394,13 @@ async function processTask(path: string, cfg: Cfg, host: string) {
     if (res.status !== "done") void track(handleFailure(meta, body, res.summary, out, cfg, host));
   }
   await _commitPush(`[${host}] ${res.status} ${meta.id}: ${meta.title}`);
+  // the scores open each PR / MR the run named, so a reviewer sees them before the diff
+  if (grade && res.status !== "failed") {
+    const links = reviews;
+    if (links.length) void track(stampReviews(links, grade, !isEnglish()).then((ok) => {
+      if (ok.length < links.length) console.warn(`[grade] ${meta.id}: could not update ${links.filter((l) => !ok.includes(l)).join(", ")}`);
+    }));
+  }
   });
 }
 
